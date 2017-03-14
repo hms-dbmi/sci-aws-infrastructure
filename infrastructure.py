@@ -6,8 +6,8 @@ sys.path.insert(0, "/Users/mtmcduffie/src/devops/aws-python-utilities")
 
 from ecs import create_ecs_cluster, create_ecs_ec2, create_ecs_task
 from security_group import create_security_groups, create_db_security_groups
-from utilities import read_settings_file
-from populate_vault import populate_vault_django_secret, populate_vault_auth0, populate_vault_auth0_full, populate_vault_registration_services, secret_to_vault
+from utilities import read_settings_file, read_key_file
+from populate_vault import populate_vault_django_secret, populate_vault_auth0_full, populate_vault_registration_services, secret_to_vault
 from rds import create_db_subnet, create_db, create_database_for_task
 from subnets import create_db_subnets
 
@@ -25,7 +25,7 @@ vpc = ec2.Vpc(vpc_id)
 ecs_client = boto3.client('ecs')
 rds_client = boto3.client('rds')
 
-ENVIRONMENT = "DEV"
+ENVIRONMENT = "PROD"
 
 stack_name = settings["STACK_NAME"] + "-" + ENVIRONMENT
 
@@ -107,6 +107,16 @@ if steps["POPULATE_VAULT"] == "True":
 
     secret_to_vault(settings, vault_path_scireg + "/mysql_username", "scireg")
     secret_to_vault(settings, vault_path_scireg + "/mysql_port", MYSQL_PORT)
+
+    secret_to_vault(settings, vault_path_sciauth + "/ssl_key", read_key_file(settings["SSL_KEY_FILE_SCIAUTH"]).decode("utf-8"))
+    secret_to_vault(settings, vault_path_sciauth + "/ssl_cert_chain", read_key_file(settings["SSL_CERT_CHAIN_FILE_SCIAUTH"]).decode("utf-8"))
+
+    secret_to_vault(settings, vault_path_sciauthz + "/ssl_key", read_key_file(settings["SSL_KEY_FILE_SCIAUTHZ"]).decode("utf-8"))
+    secret_to_vault(settings, vault_path_sciauthz + "/ssl_cert_chain", read_key_file(settings["SSL_CERT_CHAIN_FILE_SCIAUTHZ"]).decode("utf-8"))
+
+    secret_to_vault(settings, vault_path_scireg + "/ssl_key", read_key_file(settings["SSL_KEY_FILE_SCIREG"]).decode("utf-8"))
+    secret_to_vault(settings, vault_path_scireg + "/ssl_cert_chain", read_key_file(settings["SSL_CERT_CHAIN_FILE_SCIREG"]).decode("utf-8"))
+
 
 if steps["POPULATE_VAULT_HYPATIO"] == "True":
     populate_vault_django_secret(settings, ENVIRONMENT.lower(), "hypatio")
