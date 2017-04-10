@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, "/Users/mtmcduffie/src/devops/aws-python-utilities")
 
 from ecs import create_ecs_cluster, create_ecs_ec2, create_ecs_task
-from security_group import create_security_groups, create_db_security_groups
+from security_group import create_security_groups, create_db_security_groups, add_ingress_to_sg
 from utilities import read_settings_file, read_key_file
 from populate_vault import populate_vault_django_secret, populate_vault_auth0_full, populate_vault_registration_services, secret_to_vault
 from rds import create_db_subnet, create_db, create_database_for_task
@@ -96,6 +96,7 @@ if steps["POPULATE_VAULT"] == "True":
     populate_vault_django_secret(settings, ENVIRONMENT.lower(), "scireg")
 
     populate_vault_auth0_full(settings, ENVIRONMENT.lower(), "sciauth")
+    populate_vault_auth0_full(settings, ENVIRONMENT.lower(), "scireg")
 
     populate_vault_registration_services(settings, "scireg/" + ENVIRONMENT.lower(), "SCIREG")
 
@@ -107,6 +108,13 @@ if steps["POPULATE_VAULT"] == "True":
 
     secret_to_vault(settings, vault_path_scireg + "/mysql_username", "scireg")
     secret_to_vault(settings, vault_path_scireg + "/mysql_port", MYSQL_PORT)
+    secret_to_vault(settings, vault_path_scireg + "/email_salt", settings["EMAIL_SALT"])
+    secret_to_vault(settings, vault_path_scireg + "/confirm_email_url", settings["CONFIRM_EMAIL_URL"])
+
+    secret_to_vault(settings, vault_path_scireg + "/email_host", settings["EMAIL_HOST"])
+    secret_to_vault(settings, vault_path_scireg + "/email_host_user", settings["EMAIL_HOST_USER"])
+    secret_to_vault(settings, vault_path_scireg + "/email_host_password", settings["EMAIL_HOST_PASSWORD"])
+    secret_to_vault(settings, vault_path_scireg + "/email_port", settings["EMAIL_PORT"])
 
     secret_to_vault(settings, vault_path_sciauth + "/ssl_key", read_key_file(settings["SSL_KEY_FILE_SCIAUTH"]).decode("utf-8"))
     secret_to_vault(settings, vault_path_sciauth + "/ssl_cert_chain", read_key_file(settings["SSL_CERT_CHAIN_FILE_SCIAUTH"]).decode("utf-8"))
@@ -122,3 +130,8 @@ if steps["POPULATE_VAULT_HYPATIO"] == "True":
     populate_vault_django_secret(settings, ENVIRONMENT.lower(), "hypatio")
     populate_vault_auth0_full(settings, ENVIRONMENT.lower(), "hypatio")
     populate_vault_registration_services(settings, "hypatio/" + ENVIRONMENT.lower(), "HYPATIO")
+
+if steps["ADD_SG_IO"] == "True":
+
+    # This lets anyone hit the Registration server.
+    add_ingress_to_sg(stack_name, vpc, "0.0.0.0/0", 8005, 8005)
