@@ -25,7 +25,7 @@ vpc = ec2.Vpc(vpc_id)
 ecs_client = boto3.client('ecs')
 rds_client = boto3.client('rds')
 
-ENVIRONMENT = "PROD"
+ENVIRONMENT = settings["ENVIRONMENT"]
 
 stack_name = settings["STACK_NAME"] + "-" + ENVIRONMENT
 
