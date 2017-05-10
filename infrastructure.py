@@ -103,6 +103,8 @@ if steps["POPULATE_VAULT"] == "True":
     secret_to_vault(settings, vault_path_sciauth + "/mysql_username", "sciauth")
     secret_to_vault(settings, vault_path_sciauth + "/mysql_port", MYSQL_PORT)
 
+    secret_to_vault(settings, vault_path_sciauth + "/cookie_domain", settings["COOKIE_DOMAIN"])
+
     secret_to_vault(settings, vault_path_sciauthz + "/mysql_username", "sciauthz")
     secret_to_vault(settings, vault_path_sciauthz + "/mysql_port", MYSQL_PORT)
 
@@ -110,6 +112,8 @@ if steps["POPULATE_VAULT"] == "True":
     secret_to_vault(settings, vault_path_scireg + "/mysql_port", MYSQL_PORT)
     secret_to_vault(settings, vault_path_scireg + "/email_salt", settings["EMAIL_SALT"])
     secret_to_vault(settings, vault_path_scireg + "/confirm_email_url", settings["CONFIRM_EMAIL_URL"])
+
+    secret_to_vault(settings, vault_path_scireg + "/cookie_domain", settings["COOKIE_DOMAIN"])
 
     secret_to_vault(settings, vault_path_scireg + "/email_host", settings["EMAIL_HOST"])
     secret_to_vault(settings, vault_path_scireg + "/email_host_user", settings["EMAIL_HOST_USER"])
