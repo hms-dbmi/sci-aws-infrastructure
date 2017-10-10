@@ -19,6 +19,7 @@ from populate_parameter_store import populate_ps_auth0, populate_ps_django_secre
 from codepipeline import create_pipeline
 from codebuild import create_codebuild
 from botocore.exceptions import ClientError
+from health_check import create_health_check_lambda
 
 parser = argparse.ArgumentParser()
 parser.add_argument("settings_file")
@@ -34,6 +35,7 @@ vpc = ec2.Vpc(vpc_id)
 ecs_client = boto3.client('ecs')
 rds_client = boto3.client('rds')
 ssm_client = boto3.client('ssm')
+ec2_client = boto3.client('ec2')
 
 ENVIRONMENT = settings["ENVIRONMENT"]
 
@@ -41,7 +43,7 @@ stack_name = settings["STACK_NAME"] + "-" + ENVIRONMENT
 
 ecs_cluster_name = settings["STACK_NAME"] + "-" + ENVIRONMENT
 
-userdata_string = "#!/bin/bash\necho ECS_CLUSTER=" + ecs_cluster_name + " >> /etc/ecs/ecs.config"
+userdata_string = "#!/bin/bash\necho ECS_CLUSTER=" + ecs_cluster_name + " >> /etc/ecs/ecs.config\n"
 
 MYSQL_USERNAME = "root"
 MYSQL_PORT = "3306"
@@ -55,7 +57,8 @@ secret_list = {"SCIAUTH":[
                 ],
                "SCIAUTHZ":[
                         {"secret_name": "mysql_username", "secret_value": "sciauthz"},
-                        {"secret_name": "mysql_port", "secret_value": MYSQL_PORT}
+                        {"secret_name": "mysql_port", "secret_value": MYSQL_PORT},
+                        {"secret_name": "first_admin_email", "secret_value": settings["FIRST_ADMIN_EMAIL"]},
                 ],
                 "HYPATIO": [
                     {"secret_name": "mysql_username", "secret_value": "hypatio"},
@@ -65,6 +68,10 @@ secret_list = {"SCIAUTH":[
                     {"secret_name": "register_user_url", "secret_value": settings["SCIREG_URL"]},
                     {"secret_name": "authorization_server_url", "secret_value": settings["PERMISSION_SERVER_URL"]},
                     {"secret_name": "cookie_domain", "secret_value": settings["COOKIE_DOMAIN"]},
+                    {"secret_name": "email_host", "secret_value": settings["EMAIL_HOST"]},
+                    {"secret_name": "email_host_user", "secret_value": settings["EMAIL_HOST_USER"]},
+                    {"secret_name": "email_host_password", "secret_value": settings["EMAIL_HOST_PASSWORD"]},
+                    {"secret_name": "email_port", "secret_value": settings["EMAIL_PORT"]},
                 ],
                "SCIREG":[
                         {"secret_name": "mysql_username", "secret_value": "scireg"},
@@ -95,6 +102,12 @@ if steps["CREATE_CLUSTER"] == "True":
     create_ecs_cluster(ecs_client, ecs_cluster_name)
 
 if steps["CREATE_ECS_EC2"] == "True":
+
+    if ENVIRONMENT=="DEV":
+        userdata_string = userdata_string + "yum install -y jq\n"
+        userdata_string = userdata_string + "region=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)\n"
+        userdata_string = userdata_string + "yum install -y https://amazon-ssm-$region.s3.amazonaws.com/latest/linux_amd64/amazon-ssm-agent.rpm\n"
+
     create_ecs_ec2(stack_name, ecs_cluster_name, vpc, ec2, userdata_string, settings, ENVIRONMENT)
 
 if steps["CREATE_SERVICE"] == "True":
@@ -140,22 +153,22 @@ if steps["ADD_POLICY_TO_ECS_TASK_ROLE"] == "True":
 if steps["CREATE_TASK_HYPATIO"] == "True":
     ecs_task_family = ecs_cluster_name
 
-    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "HYPATIO")
+    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "HYPATIO", "arn:aws:iam::" + settings["ACCOUNT_NUMBER"] + ":role/SCI-DEV-HYPATIO-TASK-ROLE")
 
 if steps["CREATE_TASK_SCIAUTH"] == "True":
     ecs_task_family = ecs_cluster_name
 
-    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "SCIAUTH", "arn:aws:iam::685606823951:role/SCI-DEV-SCIAUTH-TASK-ROLE")
+    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "SCIAUTH", "arn:aws:iam::" + settings["ACCOUNT_NUMBER"] + ":role/SCI-DEV-SCIAUTH-TASK-ROLE")
 
 if steps["CREATE_TASK_SCIAUTHZ"] == "True":
     ecs_task_family = ecs_cluster_name
 
-    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "SCIAUTHZ")
+    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "SCIAUTHZ", "arn:aws:iam::" + settings["ACCOUNT_NUMBER"] + ":role/SCI-DEV-SCIAUTHZ-TASK-ROLE")
 
 if steps["CREATE_TASK_SCIREG"] == "True":
     ecs_task_family = ecs_cluster_name
 
-    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "SCIREG", "arn:aws:iam::685606823951:role/SCI-DEV-SCIREG-TASK-ROLE")
+    create_ecs_task(ecs_client, ecs_task_family, ecs_cluster_name, settings, ENVIRONMENT.lower(), "SCIREG", "arn:aws:iam::" + settings["ACCOUNT_NUMBER"] + ":role/SCI-DEV-SCIREG-TASK-ROLE")
 
 if steps["CREATE_RDS"] == "True":
     create_db(stack_name, vpc, rds_client, settings, ENVIRONMENT, "SCI")
@@ -165,10 +178,13 @@ if steps["CREATE_DBS"] == "True":
     for task_name in TASK_NAMES:
         create_database_for_task(settings, "SCI", task_name, ENVIRONMENT)
 
-
 if steps["POPULATE_AWS_PARAMETER_STORE"] == "True":
 
+    print("Populating AWS Parameter Store.")
+
     for task_name in TASK_NAMES:
+
+        print('Working on {}'.format(task_name))
 
         current_secret_list = secret_list[task_name]
 
@@ -187,7 +203,7 @@ if steps["POPULATE_AWS_PARAMETER_STORE"] == "True":
         populate_ps_django_secret(settings, ssm_client, ENVIRONMENT.upper(), task_name.lower(), key_name, dry_run)
         populate_ps_auth0(settings, ssm_client, ENVIRONMENT.upper(), task_name.lower(), key_name, dry_run)
 
-        if task_name == "SCIAUTH" or task_name == "HYPATIO":
+        if task_name == "SCIAUTH" or task_name == "HYPATIO" or task_name == "SCIREG":
             populate_ps_auth0_full(settings, ssm_client, ENVIRONMENT.upper(), task_name.lower(), key_name, dry_run)
 
         # I know, I know. The Cert is too long for one SecureString. Split it to multiple secrets.
@@ -204,11 +220,19 @@ if steps["POPULATE_AWS_PARAMETER_STORE"] == "True":
         secret_to_ps(ssm_client, vault_path + "mysql_host", settings["DB_HOST"], key_name, dry_run)
         secret_to_ps(ssm_client, vault_path + "mysql_pw", settings["DB_PW_" + task_name], key_name, dry_run)
 
+        secret_to_ps(ssm_client, vault_path + "allowed_hosts", settings["ALLOWED_HOSTS"], key_name, dry_run)
+
+        secret_to_ps(ssm_client, vault_path + "raven_url", settings["RAVEN_URL"], key_name, dry_run)
+
 if steps["ADD_SG_IO"] == "True":
 
     # This lets anyone hit the Hypatio server.
     add_ingress_to_sg(stack_name, vpc, "0.0.0.0/0", 80, 80)
     add_ingress_to_sg(stack_name, vpc, "0.0.0.0/0", 443, 443)
+
+    # SSH access for Nessus agent, DEV Only.
+    if ENVIRONMENT=="DEV":
+        add_ingress_to_sg(stack_name, vpc, "0.0.0.0/0", 22, 22)
 
     # This lets anyone hit the authentication server.
     add_ingress_to_sg(stack_name, vpc, "0.0.0.0/0", 8001, 8001)
@@ -225,6 +249,21 @@ if steps["CREATE_CODEBUILD"] == "True":
 
         create_codebuild(stack_name + "-" + task_name, task_name.lower(), ENVIRONMENT.lower(), settings)
 
+if steps["CREATE_HEALTHCHECK_LAMBDA"] == "True":
+    # SciAuth
+    create_health_check_lambda(settings["ACCOUNT_NUMBER"],
+                               "sciauth-prod",
+                               "/Users/mtmcduffie/src/devops/aws-python-utilities/lambda_healthcheck.py",
+                               '{"url":"https://authentication.dbmi.hms.harvard.edu:8001/login/auth"}',
+                               settings["HEALTHCHECK_ARN"])
+
+    # Hypatio
+    create_health_check_lambda(settings["ACCOUNT_NUMBER"],
+                               "portal-prod",
+                               "/Users/mtmcduffie/src/devops/aws-python-utilities/lambda_healthcheck.py",
+                               '{"url":"https://portal.dbmi.hms.harvard.edu/"}',
+                               settings["HEALTHCHECK_ARN"])
+
 if steps["CREATE_CODEPIPELINE"] == "True":
 
     for task_name in TASK_NAMES:
@@ -232,3 +271,28 @@ if steps["CREATE_CODEPIPELINE"] == "True":
         secret_path = settings["VAULT_PROJECT_NAME"] + "/" + task_name.lower()
 
         create_pipeline(stack_name, ENVIRONMENT, task_name, settings, secret_path)
+
+if steps["ADD_NESSUS_AGENT_LOGIN"] == "True":
+    if ENVIRONMENT=="DEV":
+        filters = [{
+            'Name': 'tag:Name',
+            'Values': [stack_name]}, {
+            'Name': 'instance-state-name',
+            'Values': ['running']}
+        ]
+
+        nessus_public_key = read_key_file(settings["NESSUS_PUBLIC_KEY_FILE"],False)
+
+        ecs_ec2_instance1 = ec2_client.describe_instances(Filters=filters)
+
+        ec2_waiter = ec2_client.get_waiter('instance_status_ok')
+        ec2_waiter.wait(InstanceIds=[ecs_ec2_instance1['Reservations'][0]['Instances'][0]['InstanceId']])
+
+        ssm_client = boto3.client('ssm')
+        ssm_client.send_command(InstanceIds=[ecs_ec2_instance1['Reservations'][0]['Instances'][0]['InstanceId']],
+                                DocumentName="AWS-RunShellScript",
+                                Parameters={'commands': ["sudo adduser nessus",
+                                                         "sudo mkdir /home/nessus/.ssh",
+                                                         "sudo chmod 700 /home/nessus/.ssh",
+                                                         "sudo echo '" + nessus_public_key.decode("utf-8") + "' >> /home/nessus/.ssh/authorized_keys",
+                                                         "sudo chown -R nessus:nessus /home/nessus"]})
